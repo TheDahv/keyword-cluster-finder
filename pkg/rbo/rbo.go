@@ -114,12 +114,6 @@ func rawOverlap(a, b rankings.SERP, depth int) (int, int, int) {
 	for _, member := range b.Members {
 		bCopy = append(bCopy, member)
 	}
-	//sort.SliceStable(aCopy, func(i, j int) bool {
-	//	return aCopy[i].Domain < aCopy[j].Domain
-	//})
-	//sort.SliceStable(bCopy, func(i, j int) bool {
-	//	return bCopy[i].Domain < bCopy[j].Domain
-	//})
 
 	aMembers := aCopy[:min(depth, len(aCopy))]
 	bMembers := bCopy[:min(depth, len(bCopy))]
