@@ -9,16 +9,9 @@ import (
 	"github.com/thedahv/keyword-cluster-finder/pkg/rankings"
 )
 
-// WeightedEdge describes a relationship between 2 SERPs where its weight
-// reflects its similarity with respect to the RBO calculation
-type WeightedEdge struct {
-	From rankings.SERP
-	To   rankings.SERP
-	RBO  float64
-}
-
 const rboPValue = 0.9
 
+// Use data from ../../pkg/rankings/test-data for sample input
 func main() {
 	args := os.Args[1:]
 
@@ -33,7 +26,7 @@ func main() {
 	}
 
 	g := graph.New(
-		graph.WithRBOPValue(0.9),
+		graph.WithRBOPValue(rboPValue),
 		graph.WithClusterPower(2),
 		graph.WithClusterInflation(5),
 		graph.WithClusterMaxIterations(100),

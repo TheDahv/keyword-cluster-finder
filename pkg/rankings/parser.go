@@ -1,6 +1,7 @@
 package rankings
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,7 +10,12 @@ import (
 	"os"
 	"path"
 	"sync"
+
+	"github.com/cheggaaa/pb"
+	"github.com/thedahv/keyword-cluster-finder/pkg/data"
 )
+
+const maxInFlight = 10
 
 // KeywordData contains all SERP data for a group of keywords
 type KeywordData map[string]SERP
@@ -63,8 +69,8 @@ func Parse(rdr io.Reader) (SERP, error) {
 	return serp, nil
 }
 
-// Build builds a KeywordData set by parsing and adding SERP members
-func (kd KeywordData) Build(paths []string) error {
+// BuildFromDisk builds a KeywordData set by parsing and adding SERP members
+func (kd KeywordData) BuildFromDisk(paths []string) error {
 	var errors []error
 	if len(paths) == 0 {
 		return nil
@@ -98,7 +104,69 @@ func (kd KeywordData) Build(paths []string) error {
 	if len(errors) > 0 {
 		return BuildError{Errors: errors}
 	}
+	return nil
+}
 
+// BuildFromDatabase fetches prominent SERP members from the database for each
+// given keyword
+func (kd KeywordData) BuildFromDatabase(driver *data.Driver, domainID int, keywords []string, bar *pb.ProgressBar) error {
+	var errors []error
+	if len(keywords) == 0 {
+		return nil
+	}
+
+	var lock sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(len(keywords))
+
+	// If you're not familiar with this pattern, we are using a buffered channel
+	// to limit the amount of concurrent work in-flight. This is an expensive
+	// query on the database, so we want to control the number of concurrent
+	// queries. A buffered channel will block when it is full, so work can only
+	// be added as work is removed.
+	work := make(chan string, maxInFlight)
+	go func() {
+		for keyword := range work {
+			go func(keyword string) {
+				defer wg.Done()
+				var serp SERP
+				serp.Keyword = keyword
+
+				err := driver.FetchSERP(domainID, keyword, func(row *sql.Rows) error {
+					sm := SERPMember{}
+					err := row.Scan(&sm.Keyword, &sm.Prominence, &sm.Domain)
+					if err != nil {
+						return err
+					}
+					serp.Members = append(serp.Members, sm)
+					return nil
+				})
+
+				if err != nil {
+					errors = append(errors, fmt.Errorf("could not query for %s: %v", keyword, err))
+				}
+
+				lock.Lock()
+				kd[keyword] = serp
+				lock.Unlock()
+
+				if bar != nil {
+					bar.Increment()
+				}
+			}(keyword)
+		}
+	}()
+
+	for _, keyword := range keywords {
+		work <- keyword
+	}
+
+	wg.Wait()
+	close(work)
+
+	if len(errors) > 0 {
+		return BuildError{Errors: errors}
+	}
 	return nil
 }
 
@@ -134,7 +202,7 @@ func ProcessDirectory(directory string) (KeywordData, error) {
 	}
 
 	kd := New()
-	err = kd.Build(paths)
+	err = kd.BuildFromDisk(paths)
 	if err != nil {
 		log.Fatalf("could not build keyword data: %v", err)
 	}
